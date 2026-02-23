@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procesos Termodinámicos Interactivos con Partículas</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        h1 { color: #2c3e50; margin-bottom: 5px; text-align: center;}
+        .subtitle { font-size: 1.1em; color: #7f8c8d; margin-bottom: 20px; text-align: center; }
+        .dashboard { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; max-width: 1200px; }
+        .panel { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: flex; flex-direction: column; align-items: center; }
+        .controls { display: flex; flex-direction: column; gap: 15px; width: 250px; }
+        select, button { padding: 10px; font-size: 1em; border-radius: 5px; border: 1px solid #ccc; }
+        button { background-color: #3498db; color: white; border: none; cursor: pointer; font-weight: bold; transition: background 0.3s; }
+        button:hover { background-color: #2980b9; }
+        .radio-group { display: flex; gap: 10px; justify-content: center; }
+        canvas { border: 1px solid #bdc3c7; background-color: #ecf0f1; border-radius: 5px; }
+        .data-box { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; width: 100%; box-sizing: border-box; font-family: monospace; font-size: 1.1em; margin-top: 15px; }
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .highlight { color: #e74c3c; font-weight: bold; }
+        
+        /* Estilos para el cuadro de información del proceso */
+        .process-info-box {
+            background: #1a252f;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 15px;
+            border-left: 5px solid #f39c12;
+        }
+        .process-title {
+            color: #f39c12;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+            display: block;
+            text-transform: uppercase;
+        }
+        .process-equation {
+            font-family: monospace;
+            background: #0e161c;
+            padding: 8px 12px;
+            border-radius: 3px;
+            margin-bottom: 15px;
+            display: inline-block;
+            font-size: 1.1em;
+            color: #3498db;
+        }
+        #procDesc {
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Laboratorio de Procesos Termodinámicos</h1>
+    <div class="subtitle">Simulación de un Gas Ideal (n = 1 mol, &gamma; = 1.4) con Modelo de Partículas</div>
+
+    <div class="dashboard">
+        <div class="panel controls">
+            <h3>Configuración</h3>
+            <label for="processSelect">Tipo de Proceso:</label>
+            <select id="processSelect">
+                <option value="isotermico">Isotérmico (T constante)</option>
+                <option value="isobarico">Isobárico (P constante)</option>
+                <option value="isocorico">Isocórico (V constante)</option>
+                <option value="adiabatico">Adiabático (Q = 0)</option>
+            </select>
+
+            <label>Dirección:</label>
+            <div class="radio-group">
+                <label id="lblRadio1"><input type="radio" name="direction" value="expansion" checked> Expansión</label>
+                <label id="lblRadio2"><input type="radio" name="direction" value="compresion"> Compresión</label>
+            </div>
+
+            <button onclick="startSimulation()">Iniciar Simulación</button>
+            <button onclick="resetSimulation()" style="background-color: #95a5a6;">Reiniciar</button>
+
+            <div class="data-box" id="dataBox">
+                <div class="data-row"><span>Presión (P):</span> <span id="valP">1.00</span> atm</div>
+                <div class="data-row"><span>Volumen (V):</span> <span id="valV">22.4</span> L</div>
+                <div class="data-row"><span>Temp (T):</span> <span id="valT">273</span> K</div>
+                <hr style="border-color:#7f8c8d; margin: 10px 0;">
+                <div class="data-row" style="text-align: center; display: block; font-size: 0.9em;" id="leyTermo">
+                    Q = &Delta;U + W
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>Visualización Física</h3>
+            <canvas id="cylinderCanvas" width="300" height="400"></canvas>
+        </div>
+
+        <div class="panel" style="width: 400px;">
+            <h3>Diagrama P-V</h3>
+            <canvas id="pvCanvas" width="400" height="400"></canvas>
+            
+            <div class="process-info-box" id="processInfoBox">
+                <span class="process-title" id="procTitle">PROCESO</span>
+                <div class="process-equation" id="procEq">Ecuación</div>
+                <div id="procDesc">Descripción del proceso termodinámico.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuración Física Básica ---
+        const R = 0.082; 
+        const n = 1;
+        const gamma = 1.4; // Gas diatómico
+        
+        // Estado Inicial de Referencia
+        const P0 = 1.0;     // atm
+        const V0 = 22.4;    // L
+        const T0 = 273;     // K
+        
+        let state = { P: P0, V: V0, T: T0 };
+        let historyPV = [];
+        
+        let targetV = V0;
+        let isAnimating = false;
+        let processType = 'isotermico';
+        let isExpansion = true;
+        let animProgress = 0; 
+
+        // --- Sistema de Partículas ---
+        const numParticles = 60;
+        let particles = [];
+        const ctxCyl = document.getElementById('cylinderCanvas').getContext('2d');
+        const ctxPV = document.getElementById('pvCanvas').getContext('2d');
+
+        // Lógica para cambiar dinámicamente las etiquetas de Expansión/Compresión
+        document.getElementById('processSelect').addEventListener('change', function(e) {
+            const val = e.target.value;
+            if (val === 'isocorico') {
+                document.getElementById('lblRadio1').innerHTML = '<input type="radio" name="direction" value="expansion" checked> Calentamiento';
+                document.getElementById('lblRadio2').innerHTML = '<input type="radio" name="direction" value="compresion"> Enfriamiento';
+            } else {
+                document.getElementById('lblRadio1').innerHTML = '<input type="radio" name="direction" value="expansion" checked> Expansión';
+                document.getElementById('lblRadio2').innerHTML = '<input type="radio" name="direction" value="compresion"> Compresión';
+            }
+        });
+
+        // Inicializar partículas
+        function initParticles() {
+            particles = [];
+            const cx = 150; const w = 120; const maxH = 250; const yBase = 350;
+            const h = (state.V / 45) * maxH;
+            const yPiston = yBase - h;
+
+            for (let i = 0; i < numParticles; i++) {
+                particles.push({
+                    x: cx - w/2 + 5 + Math.random() * (w - 10),
+                    y: yPiston + 5 + Math.random() * (h - 10),
+                    vx: (Math.random() - 0.5) * 3, 
+                    vy: (Math.random() - 0.5) * 3,
+                    radius: 2.5
+                });
+            }
+        }
+
+        function startSimulation() {
+            if (isAnimating) return;
+            
+            processType = document.getElementById('processSelect').value;
+            isExpansion = document.querySelector('input[name="direction"]:checked').value === 'expansion';
+            
+            const vMin = 10; const vMax = 40;
+            
+            // Configurar estado inicial y final
+            if (processType === 'isocorico') {
+                state.V = V0; 
+                targetV = V0;
+                // Para isocórico, usamos isExpansion como Calentamiento
+                if (isExpansion) {
+                    state.P = P0 * 0.5; // Empieza frío/baja presión para calentar
+                    state.T = (state.P * state.V) / (n * R);
+                } else {
+                    state.P = P0 * 2.0; // Empieza caliente/alta presión para enfriar
+                    state.T = (state.P * state.V) / (n * R);
+                }
+            } else {
+                if (isExpansion) { state.V = vMin; targetV = vMax; } 
+                else { state.V = vMax; targetV = vMin; }
+
+                if (processType === 'isobarico') {
+                    state.P = P0 * 1.5; state.T = (state.P * state.V) / (n * R);
+                } else if (processType === 'isotermico') {
+                    state.T = T0 * 1.5; state.P = (n * R * state.T) / state.V;
+                } else {
+                    state.T = T0 * 1.2; state.P = (n * R * state.T) / state.V;
+                }
+            }
+            
+            state.C_adiabatic = state.P * Math.pow(state.V, gamma);
+
+            historyPV = [];
+            animProgress = 0;
+            isAnimating = true;
+            initParticles(); 
+            requestAnimationFrame(animate);
+        }
+
+        function resetSimulation() {
+            isAnimating = false;
+            state = { P: P0, V: V0, T: T0 };
+            historyPV = [];
+            initParticles(); 
+            updateUI();
+            drawCylinder();
+            drawPV();
+        }
+
+        function animate() {
+            if (!isAnimating) return;
+
+            animProgress += 0.005; 
+            if (animProgress >= 1) { animProgress = 1; isAnimating = false; }
+
+            let easeP = animProgress < 0.5 ? 2 * animProgress * animProgress : -1 + (4 - 2 * animProgress) * animProgress;
+
+            // FÍSICA SEGÚN EL PROCESO
+            if (processType === 'isocorico') {
+                // El volumen es constante. Interpolar la Presión (y por ende la Temperatura)
+                let startP = isExpansion ? (P0 * 0.5) : (P0 * 2.0);
+                let endP = isExpansion ? (P0 * 2.0) : (P0 * 0.5);
+                state.P = startP + (endP - startP) * easeP;
+                state.T = (state.P * state.V) / (n * R);
+            } else {
+                // Procesos donde el volumen cambia
+                let startV = isExpansion ? 10 : 40;
+                let endV = targetV;
+                state.V = startV + (endV - startV) * easeP;
+
+                if (processType === 'isotermico') {
+                    state.P = (n * R * state.T) / state.V; 
+                } else if (processType === 'isobarico') {
+                    state.T = (state.P * state.V) / (n * R); 
+                } else if (processType === 'adiabatico') {
+                    state.P = state.C_adiabatic / Math.pow(state.V, gamma); 
+                    state.T = (state.P * state.V) / (n * R);
+                }
+            }
+
+            historyPV.push({ V: state.V, P: state.P });
+
+            updateUI();
+            updateParticles(); 
+            drawCylinder();
+            drawPV();
+
+            if (isAnimating) requestAnimationFrame(animate);
+        }
+
+        function updateParticles() {
+            const cx = 150; const w = 120; const yBase = 350; const maxH = 250;
+            const h = (state.V / 45) * maxH;
+            const yPiston = yBase - h;
+            const wallLeft = cx - w/2; const wallRight = cx + w/2; const wallBottom = yBase;
+
+            const speedFactor = (state.T / T0) * 1.8; 
+
+            for (let p of particles) {
+                p.x += p.vx * speedFactor;
+                p.y += p.vy * speedFactor;
+
+                if (p.x - p.radius < wallLeft || p.x + p.radius > wallRight) {
+                    p.vx *= -1;
+                    p.x = Math.max(wallLeft + p.radius, Math.min(p.x, wallRight - p.radius));
+                }
+                if (p.y - p.radius < yPiston || p.y + p.radius > wallBottom) {
+                    p.vy *= -1;
+                    p.y = Math.max(yPiston + p.radius, Math.min(p.y, wallBottom - p.radius));
+                }
+            }
+        }
+
+        function getColorFromTemp(T) {
+            let minT = 100, maxT = 800;
+            let norm = (T - minT) / (maxT - minT);
+            norm = Math.max(0, Math.min(1, norm)); 
+            let r = Math.round(255 * norm);
+            let b = Math.round(255 * (1 - norm));
+            return `rgba(${r}, 50, ${b}, 0.5)`;
+        }
+
+        function drawCylinder() {
+            ctxCyl.clearRect(0, 0, 300, 400);
+            const cx = 150; const w = 120; const yBase = 350; const maxH = 250;
+            const h = (state.V / 45) * maxH; 
+            const yPiston = yBase - h;
+
+            if (processType === 'adiabatico') {
+                ctxCyl.fillStyle = 'rgba(243, 156, 18, 0.3)'; 
+                ctxCyl.fillRect(cx - w/2 - 15, yBase - maxH - 20, w + 30, maxH + 40);
+                ctxCyl.strokeStyle = '#f39c12'; 
+                ctxCyl.lineWidth = 3;
+                ctxCyl.setLineDash([8, 6]); 
+                ctxCyl.strokeRect(cx - w/2 - 15, yBase - maxH - 20, w + 30, maxH + 40);
+                ctxCyl.setLineDash([]);
+            }
+
+            let gradient = ctxCyl.createLinearGradient(0, yPiston, 0, yBase);
+            const baseColor = getColorFromTemp(state.T);
+            gradient.addColorStop(0, baseColor.replace('0.5', '0.7')); 
+            gradient.addColorStop(1, baseColor.replace('0.5', '0.3')); 
+            ctxCyl.fillStyle = gradient;
+            ctxCyl.fillRect(cx - w/2, yPiston, w, h);
+
+            ctxCyl.fillStyle = 'rgba(255, 255, 255, 0.8)'; 
+            for (let p of particles) {
+                ctxCyl.beginPath();
+                ctxCyl.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctxCyl.fill();
+            }
+
+            ctxCyl.strokeStyle = '#2c3e50'; ctxCyl.lineWidth = 6;
+            ctxCyl.beginPath();
+            ctxCyl.moveTo(cx - w/2, yBase - maxH - 10);
+            ctxCyl.lineTo(cx - w/2, yBase);
+            ctxCyl.lineTo(cx + w/2, yBase);
+            ctxCyl.lineTo(cx + w/2, yBase - maxH - 10);
+            ctxCyl.stroke();
+
+            // Mecanismos visuales que bloquean el pistón si es isocórico
+            if (processType === 'isocorico') {
+                ctxCyl.fillStyle = '#c0392b'; // Rojo de bloqueo
+                ctxCyl.fillRect(cx - w/2 - 10, yPiston - 25, 10, 30); // Tope izquierdo
+                ctxCyl.fillRect(cx + w/2, yPiston - 25, 10, 30);      // Tope derecho
+            }
+
+            ctxCyl.fillStyle = '#bdc3c7'; 
+            ctxCyl.fillRect(cx - w/2 + 3, yPiston - 20, w - 6, 20);
+            ctxCyl.fillStyle = '#7f8c8d'; 
+            ctxCyl.fillRect(cx - 5, yPiston - 120, 10, 100); 
+            
+            ctxCyl.beginPath(); ctxCyl.arc(cx, yPiston - 120, 25, 0, 2 * Math.PI);
+            ctxCyl.fillStyle = '#34495e'; ctxCyl.fill();
+            ctxCyl.strokeStyle = '#bdc3c7'; ctxCyl.lineWidth = 4;
+            ctxCyl.beginPath(); ctxCyl.moveTo(cx, yPiston - 120); ctxCyl.lineTo(cx + 20, yPiston - 120); ctxCyl.stroke();
+
+            ctxCyl.font = "bold 16px monospace"; ctxCyl.textAlign = "center";
+            if (processType === 'adiabatico') {
+                ctxCyl.fillStyle = '#f39c12';
+                ctxCyl.fillText("ADIABÁTICO – sin Q", cx, yBase - maxH - 30);
+            } else if (isAnimating) {
+                let showHeatIn = (processType === 'isotermico' && isExpansion) || (processType === 'isobarico' && isExpansion) || (processType === 'isocorico' && isExpansion);
+                let showHeatOut = (processType === 'isotermico' && !isExpansion) || (processType === 'isobarico' && !isExpansion) || (processType === 'isocorico' && !isExpansion);
+                ctxCyl.font = "bold 20px sans-serif"; ctxCyl.textAlign = "left";
+                if (showHeatIn) { ctxCyl.fillStyle = '#e74c3c'; ctxCyl.fillText("🔥 Q entra", cx - 50, yBase + 35); }
+                else if (showHeatOut) { ctxCyl.fillStyle = '#3498db'; ctxCyl.fillText("❄️ Q sale", cx - 50, yBase + 35); }
+            }
+            ctxCyl.font = "bold 14px monospace"; ctxCyl.textAlign = "center";
+            ctxCyl.fillStyle = '#2c3e50'; 
+            ctxCyl.fillText(`T = ${state.T.toFixed(0)} K`, cx, yBase + 20);
+        }
+
+        function drawPV() {
+            ctxPV.clearRect(0, 0, 400, 400);
+            const pad = 50; const w = 400 - 2*pad; const h = 400 - 2*pad;
+            const mapV = (v) => pad + (v / 45) * w;
+            const mapP = (p) => 400 - pad - (p / 4) * h;
+
+            ctxPV.strokeStyle = '#333'; ctxPV.lineWidth = 2;
+            ctxPV.beginPath(); ctxPV.moveTo(pad, pad - 20); ctxPV.lineTo(pad, 400 - pad); ctxPV.lineTo(400 - pad + 20, 400 - pad); ctxPV.stroke();
+            ctxPV.fillStyle = '#333'; ctxPV.font = "14px Arial";
+            ctxPV.fillText("P (atm)", 10, pad - 10); ctxPV.fillText("V (L)", 400 - pad, 400 - pad + 30);
+
+            if (historyPV.length > 0) {
+                ctxPV.beginPath(); ctxPV.strokeStyle = '#2980b9'; ctxPV.lineWidth = 3;
+                ctxPV.moveTo(mapV(historyPV[0].V), mapP(historyPV[0].P));
+                for(let pt of historyPV) ctxPV.lineTo(mapV(pt.V), mapP(pt.P));
+                ctxPV.stroke();
+            }
+            
+            ctxPV.beginPath(); ctxPV.arc(mapV(state.V), mapP(state.P), 6, 0, Math.PI*2);
+            ctxPV.fillStyle = '#e74c3c'; ctxPV.fill();
+        }
+
+        function updateUI() {
+            document.getElementById('valP').innerText = state.P.toFixed(2);
+            document.getElementById('valV').innerText = state.V.toFixed(1);
+            document.getElementById('valT').innerText = state.T.toFixed(0);
+
+            let textLey = "", procTitle = "", procEq = "", procDesc = "";
+            const infoBox = document.getElementById('processInfoBox');
+            const titleElem = document.getElementById('procTitle');
+
+            if (processType === 'isotermico') {
+                textLey = "Isotérmico (&Delta;T=0) &rarr; <span class='highlight'>&Delta;U=0</span>, por lo tanto <span class='highlight'>Q=W</span>";
+                procTitle = "ISOTÉRMICO – T constante";
+                procEq = "P · V = constante";
+                procDesc = "La temperatura permanece constante. Al expandir, el gas absorbe calor y realiza trabajo. Al comprimir, el trabajo realizado sobre el gas se libera como calor.";
+                infoBox.style.borderLeftColor = "#3498db"; titleElem.style.color = "#3498db";
+
+            } else if (processType === 'adiabatico') {
+                textLey = "Adiabático (Aislado) &rarr; <span class='highlight'>Q=0</span>, por lo tanto <span class='highlight'>&Delta;U=-W</span>";
+                procTitle = "ADIABÁTICO – sin Q";
+                procEq = "P · Vγ = constante (γ = Cp/Cv)";
+                procDesc = "Sin intercambio de calor con el entorno (Q = 0). El trabajo realizado cambia la energía interna. Al expandir: el gas se enfría. Al comprimir: el gas se calienta. Curva más empinada que la isotérmica.";
+                infoBox.style.borderLeftColor = "#f39c12"; titleElem.style.color = "#f39c12";
+
+            } else if (processType === 'isobarico') {
+                textLey = "Isobárico (&Delta;P=0) &rarr; W=P&Delta;V, Calor aporta a &Delta;U y W";
+                procTitle = "ISOBÁRICO – P constante";
+                procEq = "V / T = constante (Ley de Charles)";
+                procDesc = "La presión permanece constante. Al calentar, el gas se expande. Al enfriar, se comprime. El calor transferido cambia tanto la energía interna como el trabajo realizado.";
+                infoBox.style.borderLeftColor = "#e74c3c"; titleElem.style.color = "#e74c3c";
+            
+            } else if (processType === 'isocorico') {
+                textLey = "Isocórico (&Delta;V=0) &rarr; <span class='highlight'>W=0</span>, por lo tanto <span class='highlight'>Q = &Delta;U</span>";
+                procTitle = "ISOCÓRICO – V constante";
+                procEq = "P / T = constante (Ley de Gay-Lussac)";
+                procDesc = "El volumen permanece constante (el émbolo está fijo, no hay trabajo). Todo el calor absorbido se convierte exactamente en el incremento de la energía interna (el gas se calienta). Al ceder calor, se enfría y la presión baja.";
+                infoBox.style.borderLeftColor = "#27ae60"; titleElem.style.color = "#27ae60"; // Verde
+            }
+            
+            document.getElementById('leyTermo').innerHTML = textLey;
+            titleElem.innerText = procTitle;
+            document.getElementById('procEq').innerText = procEq;
+            document.getElementById('procDesc').innerText = procDesc;
+        }
+
+        initParticles();
+        resetSimulation();
+    </script>
+</body>
+</html>
